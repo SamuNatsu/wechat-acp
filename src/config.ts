@@ -107,7 +107,7 @@ export function defaultConfig(): WeChatAcpConfig {
       command: "",
       args: [],
       cwd: process.cwd(),
-      showThoughts: false,
+      showThoughts: true,
     },
     agents: { ...BUILT_IN_AGENTS },
     session: {

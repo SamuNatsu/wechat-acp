@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Forward agent thinking to WeChat by default; use `--hide-thoughts` to opt out (replaces `--show-thoughts`)
+- Add anonymous usage telemetry via Azure Application Insights; set `WECHAT_ACP_TELEMETRY=0` to disable
+
 ## 0.1.2
 
 - Add `--show-thoughts` flag to forward agent thinking to WeChat (off by default)
