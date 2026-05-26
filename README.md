@@ -87,6 +87,7 @@ Options:
 - `--no-inbox`: do not save received files; the agent only sees a size notice.
 - `--hide-thoughts`: do not forward agent thinking to WeChat (default: forwarded)
 - `--hide-diffs`: do not forward ACP file diffs to WeChat (default: forwarded)
+- `-V, --version`: print version and exit
 - `-h, --help`: show help
 
 Examples:

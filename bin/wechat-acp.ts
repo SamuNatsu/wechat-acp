@@ -39,7 +39,7 @@ function usage(): void {
     .join(", ");
 
   console.log(`
-wechat-acp — Bridge WeChat to any ACP-compatible AI agent
+wechat-acp v${packageJson.version} — Bridge WeChat to any ACP-compatible AI agent
 
 Usage:
   wechat-acp --agent <preset|command>  [options]
@@ -73,6 +73,7 @@ Options:
   --hide-thoughts     Do not forward agent thinking to WeChat (default: forwarded)
   --hide-diffs        Do not forward ACP file diffs to WeChat (default: forwarded)
   -v, --verbose       Verbose logging
+  -V, --version       Print version and exit
   -h, --help          Show this help
 `);
 }
@@ -92,6 +93,7 @@ function parseArgs(argv: string[]): {
   hideThoughts: boolean;
   hideDiffs: boolean;
   verbose: boolean;
+  version: boolean;
   help: boolean;
 } {
   const result = {
@@ -101,6 +103,7 @@ function parseArgs(argv: string[]): {
     hideThoughts: false,
     hideDiffs: false,
     verbose: false,
+    version: false,
     help: false,
   } as ReturnType<typeof parseArgs>;
 
@@ -155,6 +158,10 @@ function parseArgs(argv: string[]): {
       case "-v":
       case "--verbose":
         result.verbose = true;
+        break;
+      case "-V":
+      case "--version":
+        result.version = true;
         break;
       case "-h":
       case "--help":
@@ -262,6 +269,11 @@ function renderQrInTerminal(url: string): void {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
+
+  if (args.version) {
+    console.log(packageJson.version);
+    process.exit(0);
+  }
 
   if (args.help) {
     usage();
