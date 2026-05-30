@@ -15,15 +15,16 @@ import type { WeixinMessage } from "./weixin/types.js";
 import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import type { WeChatAcpConfig } from "./config.js";
+import { BRIDGE_COMMANDS, resolveCommandAliases, resolveCommandNames } from "./config.js";
 import { InjectionMonitor } from "./inject/monitor.js";
 import type { InjectedMessage } from "./inject/types.js";
 import { resolveUserTarget, updateLastActiveUser } from "./storage/state.js";
 import { trackEvent, trackException, hashUserId } from "./telemetry/index.js";
 
-const ACP_CONFIG_COMMAND = "/acp-config";
-const ACP_CANCEL_COMMAND = "/acp-cancel";
-const BUFFER_START_COMMAND = "/acp-prompt-start";
-const BUFFER_DONE_COMMAND = "/acp-prompt-done";
+const ACP_CONFIG_COMMAND = BRIDGE_COMMANDS.acpConfig;
+const ACP_CANCEL_COMMAND = BRIDGE_COMMANDS.acpCancel;
+const BUFFER_START_COMMAND = BRIDGE_COMMANDS.promptStart;
+const BUFFER_DONE_COMMAND = BRIDGE_COMMANDS.promptDone;
 const TEXT_CHUNK_LIMIT = 4000;
 const BUFFER_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const BUFFER_MAX_BLOCKS = 50;
@@ -395,7 +396,7 @@ export class WeChatAcpBridge {
     }
     lines.push("");
     lines.push("💡 **Usage**");
-    lines.push(`   • Cancel current turn:        ${ACP_CANCEL_COMMAND}`);
+    lines.push(`   • Cancel current turn:        ${ACP_CANCEL_COMMAND}${this.aliasHint(ACP_CANCEL_COMMAND)}`);
     lines.push(`   • Cancel + drop queued msgs:  ${ACP_CANCEL_COMMAND} all`);
     return lines.join("\n");
   }
@@ -407,7 +408,7 @@ export class WeChatAcpBridge {
       lines.push("");
     }
     lines.push("💡 **Usage**");
-    lines.push(`   • Cancel current turn:        ${ACP_CANCEL_COMMAND}`);
+    lines.push(`   • Cancel current turn:        ${ACP_CANCEL_COMMAND}${this.aliasHint(ACP_CANCEL_COMMAND)}`);
     lines.push(`   • Cancel + drop queued msgs:  ${ACP_CANCEL_COMMAND} all`);
     return lines.join("\n");
   }
@@ -423,7 +424,7 @@ export class WeChatAcpBridge {
   private handleBufferStart(userId: string, contextToken: string): void {
     if (this.messageBuffers.has(userId)) {
       const buffer = this.messageBuffers.get(userId)!;
-      this.sendReply(userId, contextToken, `📝 Already in buffering mode (${buffer.blocks.length} block(s) collected). Keep sending, then /acp-prompt-done to submit.`).catch((err) => {
+      this.sendReply(userId, contextToken, `📝 Already in buffering mode (${buffer.blocks.length} block(s) collected). Keep sending, then ${BUFFER_DONE_COMMAND}${this.aliasHint(BUFFER_DONE_COMMAND)} to submit.`).catch((err) => {
         this.log(`Failed to send buffer active notice to ${userId}: ${String(err)}`);
       });
       return;
@@ -437,7 +438,7 @@ export class WeChatAcpBridge {
       { userIdHash: hashUserId(userId) },
       hashUserId(userId),
     );
-    this.sendReply(userId, contextToken, "📝 Buffering mode started. Send your messages (text, images, files), then send /acp-prompt-done to submit them all at once.").catch((err) => {
+    this.sendReply(userId, contextToken, `📝 Buffering mode started. Send your messages (text, images, files), then send ${BUFFER_DONE_COMMAND}${this.aliasHint(BUFFER_DONE_COMMAND)} to submit them all at once.`).catch((err) => {
       this.log(`Failed to send buffer start confirmation to ${userId}: ${String(err)}`);
     });
   }
@@ -445,7 +446,7 @@ export class WeChatAcpBridge {
   private handleBufferDone(userId: string, contextToken: string): Promise<void> {
     const buffer = this.messageBuffers.get(userId);
     if (!buffer) {
-      return this.sendReply(userId, contextToken, "⚠️ Nothing buffered. Send /acp-prompt-start first, then send messages before /acp-prompt-done.");
+      return this.sendReply(userId, contextToken, `⚠️ Nothing buffered. Send ${BUFFER_START_COMMAND}${this.aliasHint(BUFFER_START_COMMAND)} first, then send messages before ${BUFFER_DONE_COMMAND}${this.aliasHint(BUFFER_DONE_COMMAND)}.`);
     }
 
     // Remove from map immediately so new messages during the await
@@ -480,18 +481,18 @@ export class WeChatAcpBridge {
       // A prior append failed (e.g. image download error). The chain
       // already logged/tracked the error. Clear the buffer so the user
       // can start fresh.
-      await this.sendReply(userId, contextToken, "⚠️ A buffered message failed to process. Buffer cleared. Please send /acp-prompt-start to try again.");
+      await this.sendReply(userId, contextToken, `⚠️ A buffered message failed to process. Buffer cleared. Please send ${BUFFER_START_COMMAND}${this.aliasHint(BUFFER_START_COMMAND)} to try again.`);
       return;
     }
 
     // Check expiry
     if (Date.now() - buffer.lastUpdatedAt > BUFFER_TTL_MS) {
-      await this.sendReply(userId, contextToken, "⚠️ Buffer expired (10 min without activity). Please send /acp-prompt-start to start over.");
+      await this.sendReply(userId, contextToken, `⚠️ Buffer expired (10 min without activity). Please send ${BUFFER_START_COMMAND}${this.aliasHint(BUFFER_START_COMMAND)} to start over.`);
       return;
     }
 
     if (buffer.blocks.length === 0) {
-      await this.sendReply(userId, contextToken, "⚠️ Buffer is empty. Send some messages before /acp-prompt-done.");
+      await this.sendReply(userId, contextToken, `⚠️ Buffer is empty. Send some messages before ${BUFFER_DONE_COMMAND}${this.aliasHint(BUFFER_DONE_COMMAND)}.`);
       return;
     }
 
@@ -529,13 +530,13 @@ export class WeChatAcpBridge {
         if (Date.now() - buffer.lastUpdatedAt > BUFFER_TTL_MS) {
           this.messageBuffers.delete(userId);
           this.log(`Buffer expired for ${userId}`);
-          await this.sendReply(userId, contextToken, "⚠️ Buffering timed out (10 min without activity). Please send /acp-prompt-start again.");
+          await this.sendReply(userId, contextToken, `⚠️ Buffering timed out (10 min without activity). Please send ${BUFFER_START_COMMAND}${this.aliasHint(BUFFER_START_COMMAND)} again.`);
           return;
         }
 
         // Check block limit
         if (buffer.blocks.length >= BUFFER_MAX_BLOCKS) {
-          await this.sendReply(userId, contextToken, `⚠️ Buffer is full (${BUFFER_MAX_BLOCKS} blocks max). Send /acp-prompt-done to submit what you have.`);
+          await this.sendReply(userId, contextToken, `⚠️ Buffer is full (${BUFFER_MAX_BLOCKS} blocks max). Send ${BUFFER_DONE_COMMAND}${this.aliasHint(BUFFER_DONE_COMMAND)} to submit what you have.`);
           return;
         }
 
@@ -751,7 +752,7 @@ export class WeChatAcpBridge {
     return this.extractBridgeCommand(msg, ACP_CANCEL_COMMAND);
   }
 
-  private extractBridgeCommand(msg: WeixinMessage, command: string): string | null {
+  private extractBridgeCommand(msg: WeixinMessage, canonical: string): string | null {
     const items = msg.item_list ?? [];
     if (items.length !== 1) return null;
 
@@ -759,7 +760,31 @@ export class WeChatAcpBridge {
     if (item?.type !== 1 || !item.text_item?.text) return null;
 
     const text = item.text_item.text.trim();
-    return text === command || text.startsWith(`${command} `) ? text : null;
+    const names = resolveCommandNames(canonical, this.config.commandAliases);
+    for (const name of names) {
+      // Exact match → normalize to the canonical command with no arguments.
+      // This is the only matching mode for bare-phrase aliases (no leading
+      // "/"), e.g. a voice-transcribed "取消", which must match the whole
+      // message to avoid false positives.
+      if (text === name) return canonical;
+      // Slash-prefixed names (the canonical command and "/"-style aliases)
+      // also support trailing arguments. Replace the matched name with the
+      // canonical command so handlers always see a single, stable token.
+      if (name.startsWith("/") && text.startsWith(`${name} `)) {
+        return canonical + text.slice(name.length);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Render a usage hint suffix listing any configured aliases for a
+   * canonical command, e.g. " (aliases: /cancel, /取消)". Returns an
+   * empty string when no aliases are configured.
+   */
+  private aliasHint(canonical: string): string {
+    const aliases = resolveCommandAliases(canonical, this.config.commandAliases);
+    return aliases.length > 0 ? ` (aliases: ${aliases.join(", ")})` : "";
   }
 
   private formatAcpConfigList(userId: string): string {
@@ -793,7 +818,7 @@ export class WeChatAcpBridge {
     lines.push("");
     lines.push("━━━━━━━━━━━━━━━━");
     lines.push("💡 **Usage**");
-    lines.push(`   • View:   ${ACP_CONFIG_COMMAND}`);
+    lines.push(`   • View:   ${ACP_CONFIG_COMMAND}${this.aliasHint(ACP_CONFIG_COMMAND)}`);
     lines.push(`   • Update: ${ACP_CONFIG_COMMAND} set <configId> <value>`);
     return lines.join("\n");
   }
@@ -805,7 +830,7 @@ export class WeChatAcpBridge {
       lines.push("");
     }
     lines.push("💡 **Usage**");
-    lines.push(`   • View:   ${ACP_CONFIG_COMMAND}`);
+    lines.push(`   • View:   ${ACP_CONFIG_COMMAND}${this.aliasHint(ACP_CONFIG_COMMAND)}`);
     lines.push(`   • Update: ${ACP_CONFIG_COMMAND} set <configId> <value>`);
     return lines.join("\n");
   }
